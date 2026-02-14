@@ -712,12 +712,6 @@ static ggml_backend_buffer_t ggml_backend_metal_device_buffer_mapped(ggml_backen
     ggml_metal_device_t ctx_dev = (ggml_metal_device_t)dev->context;
     const ggml_metal_device_props * props_dev = ggml_metal_device_get_props(ctx_dev);
 
-    // for discrete GPUs, host-mapped (Shared) buffers are extremely slow (~3 MB/s over PCIe)
-    // return NULL to force allocation through Private buffer type + blit copy to VRAM
-    if (!props_dev->has_unified_memory) {
-        return NULL;
-    }
-
     ggml_metal_buffer_t res = ggml_metal_buffer_map(ctx_dev, ptr, size, max_tensor_size);
 
     return ggml_backend_buffer_init(ggml_backend_metal_buffer_type_mapped(props_dev->device), ggml_backend_metal_buffer_shared_i, res, size);
@@ -790,6 +784,7 @@ static void ggml_backend_metal_device_event_synchronize(ggml_backend_dev_t dev, 
     ggml_metal_device_event_synchronize(ctx_dev, evt);
 }
 
+// vtable for unified-memory devices (Apple Silicon) - uses host-mapped buffers
 static ggml_backend_device_i ggml_backend_metal_device_i = {
     /* .get_name             = */ ggml_backend_metal_device_get_name,
     /* .get_description      = */ ggml_backend_metal_device_get_description,
@@ -800,6 +795,26 @@ static ggml_backend_device_i ggml_backend_metal_device_i = {
     /* .get_buffer_type      = */ ggml_backend_metal_device_get_buffer_type,
     /* .get_host_buffer_type = */ NULL,
     /* .buffer_from_host_ptr = */ ggml_backend_metal_device_buffer_mapped,
+    /* .supports_op          = */ ggml_backend_metal_device_supports_op,
+    /* .supports_buft        = */ ggml_backend_metal_device_supports_buft,
+    /* .offload_op           = */ ggml_backend_metal_device_offload_op,
+    /* .event_new            = */ ggml_backend_metal_device_event_new,
+    /* .event_free           = */ ggml_backend_metal_device_event_free,
+    /* .event_synchronize    = */ ggml_backend_metal_device_event_synchronize,
+};
+
+// vtable for discrete GPUs (AMD, etc.) - NULL buffer_from_host_ptr forces
+// the model loader to allocate Private VRAM buffers and blit-copy weights
+static ggml_backend_device_i ggml_backend_metal_device_discrete_i = {
+    /* .get_name             = */ ggml_backend_metal_device_get_name,
+    /* .get_description      = */ ggml_backend_metal_device_get_description,
+    /* .get_memory           = */ ggml_backend_metal_device_get_memory,
+    /* .get_type             = */ ggml_backend_metal_device_get_type,
+    /* .get_props            = */ ggml_backend_metal_device_get_props,
+    /* .init_backend         = */ ggml_backend_metal_device_init_backend,
+    /* .get_buffer_type      = */ ggml_backend_metal_device_get_buffer_type,
+    /* .get_host_buffer_type = */ NULL,
+    /* .buffer_from_host_ptr = */ NULL,
     /* .supports_op          = */ ggml_backend_metal_device_supports_op,
     /* .supports_buft        = */ ggml_backend_metal_device_supports_buft,
     /* .offload_op           = */ ggml_backend_metal_device_offload_op,
@@ -882,10 +897,22 @@ static ggml_backend_reg_i ggml_backend_metal_reg_i = {
 };
 
 static ggml_backend_dev_t ggml_backend_metal_device_init(ggml_backend_reg_t reg, int device) {
+    ggml_metal_device_t ctx_dev = ggml_metal_device_get(device);
+    const ggml_metal_device_props * props = ggml_metal_device_get_props(ctx_dev);
+
+    // select vtable: discrete GPUs need NULL buffer_from_host_ptr to trigger
+    // Private VRAM allocation + blit copy instead of host-mapped Shared buffers
+    ggml_backend_device_i iface = props->has_unified_memory
+        ? ggml_backend_metal_device_i
+        : ggml_backend_metal_device_discrete_i;
+
+    GGML_LOG_INFO("%s: device %d (%s) using %s vtable\n", __func__, device, props->name,
+        props->has_unified_memory ? "unified-memory" : "discrete-GPU");
+
     return new ggml_backend_device {
-        /* .iface   = */ ggml_backend_metal_device_i,
+        /* .iface   = */ iface,
         /* .reg     = */ reg,
-        /* .context = */ ggml_metal_device_get(device),
+        /* .context = */ ctx_dev,
     };
 }
 
