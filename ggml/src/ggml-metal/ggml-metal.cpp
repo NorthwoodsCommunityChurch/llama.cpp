@@ -14,8 +14,8 @@
 #define GGML_METAL_MAX_DEVICES 16
 
 // number of Metal devices
-// note: can be overriden with GGML_METAL_DEVICES env to simulate virtual devices
-static int g_devices = 1;
+// auto-detected from physical GPUs, can be overridden with GGML_METAL_DEVICES env
+static int g_devices = 0; // 0 = auto-detect at registration time
 
 ////////////////////////////////////////////////////////////////////////////////
 // backend interface
@@ -710,10 +710,15 @@ static ggml_backend_buffer_type_t ggml_backend_metal_device_get_buffer_type(ggml
 
 static ggml_backend_buffer_t ggml_backend_metal_device_buffer_mapped(ggml_backend_dev_t dev, void * ptr, size_t size, size_t max_tensor_size) {
     ggml_metal_device_t ctx_dev = (ggml_metal_device_t)dev->context;
+    const ggml_metal_device_props * props_dev = ggml_metal_device_get_props(ctx_dev);
+
+    // for discrete GPUs, host-mapped (Shared) buffers are extremely slow (~3 MB/s over PCIe)
+    // return NULL to force allocation through Private buffer type + blit copy to VRAM
+    if (!props_dev->has_unified_memory) {
+        return NULL;
+    }
 
     ggml_metal_buffer_t res = ggml_metal_buffer_map(ctx_dev, ptr, size, max_tensor_size);
-
-    const ggml_metal_device_props * props_dev = ggml_metal_device_get_props(ctx_dev);
 
     return ggml_backend_buffer_init(ggml_backend_metal_buffer_type_mapped(props_dev->device), ggml_backend_metal_buffer_shared_i, res, size);
 }
@@ -907,6 +912,10 @@ ggml_backend_reg_t ggml_backend_metal_reg(void) {
         const char * env = getenv("GGML_METAL_DEVICES");
         if (env) {
             g_devices = atoi(env);
+        } else if (g_devices <= 0) {
+            // auto-detect the number of physical Metal GPUs
+            g_devices = ggml_metal_device_count();
+            GGML_LOG_INFO("%s: auto-detected %d Metal device(s)\n", __func__, g_devices);
         }
 
         static std::vector<ggml_backend_device_ptr> devs;

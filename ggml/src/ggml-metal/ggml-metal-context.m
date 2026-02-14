@@ -130,7 +130,14 @@ ggml_metal_t ggml_metal_init(ggml_metal_device_t dev) {
     res->d_queue = dispatch_queue_create("ggml-metal", DISPATCH_QUEUE_CONCURRENT);
 
     res->use_fusion      = getenv("GGML_METAL_FUSION_DISABLE") == nil;
-    res->use_concurrency = getenv("GGML_METAL_CONCURRENCY_DISABLE") == nil;
+
+    // concurrent dispatch causes cache coherency failures on AMD discrete GPUs
+    // (MTLBarrierScopeBuffers does not properly flush AMD's L2 cache between dispatches)
+    // only enable concurrency on Apple GPUs (Apple7+) where it works correctly
+    {
+        bool is_apple_gpu = props_dev->supports_gpu_family_apple7;
+        res->use_concurrency = is_apple_gpu && (getenv("GGML_METAL_CONCURRENCY_DISABLE") == nil);
+    }
 
     {
         const char * val = getenv("GGML_METAL_GRAPH_DEBUG");

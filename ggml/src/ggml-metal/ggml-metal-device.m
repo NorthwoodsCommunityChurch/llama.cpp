@@ -24,6 +24,9 @@
 static const NSInteger MTLGPUFamilyMetal3_GGML = 5001;
 static const NSInteger MTLGPUFamilyMetal4_GGML = 5002;
 
+// macOS GPU families for discrete AMD GPUs (supports SIMD-scoped operations)
+static const NSInteger MTLGPUFamilyMac2_GGML = 2002;
+
 #if !GGML_METAL_EMBED_LIBRARY
 // Here to assist with NSBundle Path Hack
 @interface GGMLMetalClass : NSObject
@@ -628,7 +631,22 @@ ggml_metal_device_t ggml_metal_device_init(int device) {
     assert(dev != NULL);
 
     if (dev->mtl_device == nil) {
-        dev->mtl_device = MTLCreateSystemDefaultDevice();
+        // enumerate all physical Metal GPUs and select by index
+        // this enables multi-GPU support on Mac Pro and similar multi-GPU systems
+        {
+            NSArray<id<MTLDevice>> *allDevices = MTLCopyAllDevices();
+            if (allDevices && [allDevices count] > 0 && device >= 0 && device < (int)[allDevices count]) {
+                dev->mtl_device = [allDevices objectAtIndex:device];
+                [dev->mtl_device retain];
+            } else {
+                GGML_LOG_WARN("%s: device index %d out of range (%d available), using default\n",
+                    __func__, device, allDevices ? (int)[allDevices count] : 0);
+                dev->mtl_device = MTLCreateSystemDefaultDevice();
+            }
+            if (allDevices) {
+                [allDevices release];
+            }
+        }
 
         if (dev->mtl_device) {
             dev->mtl_queue = [dev->mtl_device newCommandQueue];
@@ -641,12 +659,27 @@ ggml_metal_device_t ggml_metal_device_init(int device) {
             dev->props.device = device;
             dev->props.has_simdgroup_reduction  = [dev->mtl_device supportsFamily:MTLGPUFamilyApple7];
             dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
+            // AMD discrete GPUs support SIMD-scoped reduction via macOS GPU Family Mac2
+            dev->props.has_simdgroup_reduction |= [dev->mtl_device supportsFamily:MTLGPUFamilyMac2_GGML];
 
             dev->props.has_simdgroup_mm = [dev->mtl_device supportsFamily:MTLGPUFamilyApple7];
             dev->props.has_unified_memory = dev->mtl_device.hasUnifiedMemory;
 
+            // for discrete AMD GPUs: disable features that cause incorrect output
+            if (!dev->props.has_unified_memory) {
+                // simdgroup matrix multiply uses Apple's simdgroup_T8x8 types which
+                // produce incorrect results on AMD GPUs - disable
+                dev->props.has_simdgroup_mm = false;
+                GGML_LOG_INFO("%s: discrete GPU detected - disabling simdgroup_mm\n", __func__);
+            }
+
             dev->props.has_bfloat  = [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
             dev->props.has_bfloat |= [dev->mtl_device supportsFamily:MTLGPUFamilyApple6];
+
+            // BF16 is unreliable on AMD discrete GPUs
+            if (!dev->props.has_unified_memory) {
+                dev->props.has_bfloat = false;
+            }
             if (getenv("GGML_METAL_BF16_DISABLE") != NULL) {
                 dev->props.has_bfloat = false;
             }
@@ -1250,6 +1283,15 @@ bool ggml_metal_device_supports_op(ggml_metal_device_t dev, const struct ggml_te
 
 const struct ggml_metal_device_props * ggml_metal_device_get_props(ggml_metal_device_t dev) {
     return &dev->props;
+}
+
+int ggml_metal_device_count(void) {
+    NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
+    int count = devices ? (int)[devices count] : 1;
+    if (devices) {
+        [devices release];
+    }
+    return count > 0 ? count : 1;
 }
 
 //

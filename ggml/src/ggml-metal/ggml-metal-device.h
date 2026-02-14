@@ -242,6 +242,9 @@ void ggml_metal_device_free(ggml_metal_device_t dev);
 
 ggml_metal_device_t ggml_metal_device_get(int device);
 
+// returns the number of physical Metal GPU devices in the system
+int ggml_metal_device_count(void);
+
 void * ggml_metal_device_get_obj  (ggml_metal_device_t dev); // id<MTLDevice>
 void * ggml_metal_device_get_queue(ggml_metal_device_t dev); // id<MTLCommandQueue>
 
