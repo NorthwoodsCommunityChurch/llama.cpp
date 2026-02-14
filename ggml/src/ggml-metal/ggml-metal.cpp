@@ -661,16 +661,23 @@ static enum ggml_backend_dev_type ggml_backend_metal_device_get_type(ggml_backen
 }
 
 static void ggml_backend_metal_device_get_props(ggml_backend_dev_t dev, ggml_backend_dev_props * props) {
+    ggml_metal_device_t ctx_dev = (ggml_metal_device_t)dev->context;
+    const ggml_metal_device_props * props_dev = ggml_metal_device_get_props(ctx_dev);
+
     props->name        = ggml_backend_metal_device_get_name(dev);
     props->description = ggml_backend_metal_device_get_description(dev);
     props->type        = ggml_backend_metal_device_get_type(dev);
 
     ggml_backend_metal_device_get_memory(dev, &props->memory_free, &props->memory_total);
 
+    // discrete GPUs (AMD, etc.) cannot efficiently use host-mapped buffers over PCIe
+    // set buffer_from_host_ptr = false so the model loader allocates Private VRAM + blit copies
+    bool can_use_host_ptr = props_dev->has_unified_memory;
+
     props->caps = {
         /* .async                = */ true,
         /* .host_buffer          = */ false,
-        /* .buffer_from_host_ptr = */ true,
+        /* .buffer_from_host_ptr = */ can_use_host_ptr,
         /* .events               = */ true,
     };
 }
