@@ -386,6 +386,16 @@ bool ggml_metal_cpy_tensor_async(ggml_metal_t ctx_src, ggml_metal_t ctx_dst, con
             return false;
         }
 
+        // on discrete GPUs, each device has separate VRAM - a command buffer on one device
+        // cannot reference buffers from another device. Fall back to CPU staging.
+        if (ctx_src->dev != ctx_dst->dev) {
+            id<MTLDevice> dev_src = [bid_src.metal device];
+            id<MTLDevice> dev_dst = [bid_dst.metal device];
+            if (dev_src != dev_dst) {
+                return false;
+            }
+        }
+
         // queue the copy operation into the Metal context
         // this will be queued at the end, after any currently ongoing GPU operations
         id<MTLCommandQueue> queue = ggml_metal_device_get_queue(ctx_src->dev);
