@@ -1480,7 +1480,7 @@ kernel void kernel_op_sum_f32(
     }
 
     // TODO: become function constant
-    const uint nsg = (ntg.x + 31) / 32;
+    const uint nsg = (ntg.x + N_SIMDWIDTH - 1) / N_SIMDWIDTH;
 
     float sumf = 0;
 
@@ -3199,6 +3199,9 @@ void kernel_mul_mv_q8_0_f32_impl(
 
     // each thread in a SIMD group deals with NQ quants at a time
     for (int ib = ib0; ib < nb; ib += NSG*NQ) {
+#if N_SIMDWIDTH > 32
+        if (il < QK8_0/NQ) { // on 64-wide SIMD, excess threads skip computation but stay for barriers
+#endif
         for (short i = 0; i < NQ; ++i) {
             yl[i] = yb[i];
         }
@@ -3215,6 +3218,9 @@ void kernel_mul_mv_q8_0_f32_impl(
         }
 
         yb += NSG*NQ*QK8_0;
+#if N_SIMDWIDTH > 32
+        }
+#endif
     }
 
     device float * dst_f32 = (device float *) dst + (uint64_t)im*args.ne0*args.ne1 + (uint64_t)r1*args.ne0;
@@ -3251,8 +3257,8 @@ void kernel_mul_mv_ext_q4_f32_impl(
 
     const short chpt = 4; // chunks per thread
 
-  //const short nxpsg = (32);
-    const short nypsg = (32/nxpsg);
+  //const short nxpsg = (N_SIMDWIDTH);
+    const short nypsg = (N_SIMDWIDTH/nxpsg);
 
     const short tx = tiisg%nxpsg;
     const short ty = tiisg/nxpsg;
@@ -3354,8 +3360,8 @@ void kernel_mul_mv_ext_q4x4_f32_impl(
 
     const short chpt = 1;
 
-  //const short nxpsg = (32);
-    const short nypsg = (32/nxpsg);
+  //const short nxpsg = (N_SIMDWIDTH);
+    const short nypsg = (N_SIMDWIDTH/nxpsg);
 
     const short tx = tiisg%nxpsg;
     const short ty = tiisg/nxpsg;
@@ -3586,6 +3592,9 @@ void kernel_mul_mv_t_t_impl(
     device const T1 * yb = y + (ib0*NB + il*NF);
 
     for (int ib = ib0; ib < nb; ib += NSG*NF) {
+#if N_SIMDWIDTH > 32
+        if (il < NB/NF) { // on 64-wide SIMD, excess threads skip computation but stay for barriers
+#endif
         for (short i = 0; i < NF; ++i) {
             yl[i] = yb[i];
         }
@@ -3602,6 +3611,9 @@ void kernel_mul_mv_t_t_impl(
         }
 
         yb += NSG*NF*NW;
+#if N_SIMDWIDTH > 32
+        }
+#endif
     }
 
     for (int i = nb*NB + sgitg*NW + tiisg; i < args.ne00; i += NW*NSG) {
@@ -3710,6 +3722,9 @@ void kernel_mul_mv_t_t_4_impl(
     device const T14 * yb4 = y4 + (ib0*NB + il*NF)/4;
 
     for (int ib = ib0; ib < nb; ib += NSG*NF) {
+#if N_SIMDWIDTH > 32
+        if (il < NB/NF) { // on 64-wide SIMD, excess threads skip computation but stay for barriers
+#endif
         for (short i = 0; i < NF4; ++i) {
             yl4[i] = yb4[i];
         }
@@ -3726,6 +3741,9 @@ void kernel_mul_mv_t_t_4_impl(
         }
 
         yb4 += NSG*NF*NW/4;
+#if N_SIMDWIDTH > 32
+        }
+#endif
     }
 
     for (int i = nb*NB + sgitg*NW + tiisg; i < args.ne00; i += NW*NSG) {
@@ -3788,7 +3806,7 @@ void kernel_mul_mv_t_t_short_impl(
         device       char * dst,
         uint3  tgpig,
         ushort tiisg) {
-    const int r0 = tgpig.x*32 + tiisg;
+    const int r0 = tgpig.x*N_SIMDWIDTH + tiisg;
     const int r1 = tgpig.y;
     const int im = tgpig.z;
 
@@ -6695,6 +6713,9 @@ void kernel_mul_mv_q2_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
+#if N_SIMDWIDTH > 32
+    if (tiisg >= 32) return;
+#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -6800,6 +6821,9 @@ void kernel_mul_mv_q3_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
+#if N_SIMDWIDTH > 32
+    if (tiisg >= 32) return;
+#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -6965,6 +6989,9 @@ void kernel_mul_mv_q4_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
+#if N_SIMDWIDTH > 32
+    if (tiisg >= 32) return;
+#endif
     const short NSG = FC_mul_mv_nsg;
 
     constexpr uint16_t kmask1 = 0x3f3f;
@@ -7086,6 +7113,9 @@ void kernel_mul_mv_q5_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
+#if N_SIMDWIDTH > 32
+    if (tiisg >= 32) return;
+#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -7217,6 +7247,9 @@ void kernel_mul_mv_q6_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
+#if N_SIMDWIDTH > 32
+    if (tiisg >= 32) return;
+#endif
     const short NSG = FC_mul_mv_nsg;
 
     constexpr uint8_t kmask1 = 0x03;
