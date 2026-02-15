@@ -7011,9 +7011,6 @@ void kernel_mul_mv_q4_K_f32_impl(
     device const block_q4_K * x = (device const block_q4_K *) (src0 + offset0);
     device const float      * y = (device const float      *) (src1 + offset1);
 
-    float yl[16];
-    float yh[16];
-
     float sumf[nr0]={0.f};
 
     device const float * y4 = y + ix * QK_K + 64 * iq + 8 * ir;
@@ -7022,14 +7019,21 @@ void kernel_mul_mv_q4_K_f32_impl(
     thread const uint8_t * sc8 = (thread const uint8_t *)sc16;
 
     for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/8) {
-        float4 sumy = {0.f, 0.f, 0.f, 0.f};
+        // Load B vector using float4 for wider memory access (8 loads instead of 32 scalar)
+        float4 yl_0 = *(device const float4 *)(y4 +   0);
+        float4 yl_1 = *(device const float4 *)(y4 +   4);
+        float4 yl_2 = *(device const float4 *)(y4 +  32);
+        float4 yl_3 = *(device const float4 *)(y4 +  36);
+        float4 yh_0 = *(device const float4 *)(y4 + 128);
+        float4 yh_1 = *(device const float4 *)(y4 + 132);
+        float4 yh_2 = *(device const float4 *)(y4 + 160);
+        float4 yh_3 = *(device const float4 *)(y4 + 164);
 
-        for (short i = 0; i < 8; ++i) {
-            yl[i+0] = y4[i+  0]; sumy[0] += yl[i+0];
-            yl[i+8] = y4[i+ 32]; sumy[1] += yl[i+8];
-            yh[i+0] = y4[i+128]; sumy[2] += yh[i+0];
-            yh[i+8] = y4[i+160]; sumy[3] += yh[i+8];
-        }
+        float4 sumy;
+        sumy[0] = dot(yl_0, float4(1.0f)) + dot(yl_1, float4(1.0f));
+        sumy[1] = dot(yl_2, float4(1.0f)) + dot(yl_3, float4(1.0f));
+        sumy[2] = dot(yh_0, float4(1.0f)) + dot(yh_1, float4(1.0f));
+        sumy[3] = dot(yh_2, float4(1.0f)) + dot(yh_3, float4(1.0f));
 
         device const uint16_t * sc = (device const uint16_t *)x[ib].scales + iq;
         device const uint16_t * q1 = (device const uint16_t *)x[ib].qs + 16 * iq + 4 * ir;
@@ -7046,16 +7050,46 @@ void kernel_mul_mv_q4_K_f32_impl(
             float4 acc1 = {0.f, 0.f, 0.f, 0.f};
             float4 acc2 = {0.f, 0.f, 0.f, 0.f};
 
-            FOR_UNROLL (short i = 0; i < 4; ++i) {
-                acc1[0] += yl[2*i + 0] * (q1[i] & 0x000F);
-                acc1[1] += yl[2*i + 1] * (q1[i] & 0x0F00);
-                acc1[2] += yl[2*i + 8] * (q1[i] & 0x00F0);
-                acc1[3] += yl[2*i + 9] * (q1[i] & 0xF000);
-                acc2[0] += yh[2*i + 0] * (q2[i] & 0x000F);
-                acc2[1] += yh[2*i + 1] * (q2[i] & 0x0F00);
-                acc2[2] += yh[2*i + 8] * (q2[i] & 0x00F0);
-                acc2[3] += yh[2*i + 9] * (q2[i] & 0xF000);
-            }
+            // Unrolled inner loop using float4 components directly
+            // i=0: yl[0]=yl_0.x, yl[1]=yl_0.y, yl[8]=yl_2.x, yl[9]=yl_2.y
+            acc1[0] += yl_0.x * (q1[0] & 0x000F);
+            acc1[1] += yl_0.y * (q1[0] & 0x0F00);
+            acc1[2] += yl_2.x * (q1[0] & 0x00F0);
+            acc1[3] += yl_2.y * (q1[0] & 0xF000);
+            acc2[0] += yh_0.x * (q2[0] & 0x000F);
+            acc2[1] += yh_0.y * (q2[0] & 0x0F00);
+            acc2[2] += yh_2.x * (q2[0] & 0x00F0);
+            acc2[3] += yh_2.y * (q2[0] & 0xF000);
+
+            // i=1: yl[2]=yl_0.z, yl[3]=yl_0.w, yl[10]=yl_2.z, yl[11]=yl_2.w
+            acc1[0] += yl_0.z * (q1[1] & 0x000F);
+            acc1[1] += yl_0.w * (q1[1] & 0x0F00);
+            acc1[2] += yl_2.z * (q1[1] & 0x00F0);
+            acc1[3] += yl_2.w * (q1[1] & 0xF000);
+            acc2[0] += yh_0.z * (q2[1] & 0x000F);
+            acc2[1] += yh_0.w * (q2[1] & 0x0F00);
+            acc2[2] += yh_2.z * (q2[1] & 0x00F0);
+            acc2[3] += yh_2.w * (q2[1] & 0xF000);
+
+            // i=2: yl[4]=yl_1.x, yl[5]=yl_1.y, yl[12]=yl_3.x, yl[13]=yl_3.y
+            acc1[0] += yl_1.x * (q1[2] & 0x000F);
+            acc1[1] += yl_1.y * (q1[2] & 0x0F00);
+            acc1[2] += yl_3.x * (q1[2] & 0x00F0);
+            acc1[3] += yl_3.y * (q1[2] & 0xF000);
+            acc2[0] += yh_1.x * (q2[2] & 0x000F);
+            acc2[1] += yh_1.y * (q2[2] & 0x0F00);
+            acc2[2] += yh_3.x * (q2[2] & 0x00F0);
+            acc2[3] += yh_3.y * (q2[2] & 0xF000);
+
+            // i=3: yl[6]=yl_1.z, yl[7]=yl_1.w, yl[14]=yl_3.z, yl[15]=yl_3.w
+            acc1[0] += yl_1.z * (q1[3] & 0x000F);
+            acc1[1] += yl_1.w * (q1[3] & 0x0F00);
+            acc1[2] += yl_3.z * (q1[3] & 0x00F0);
+            acc1[3] += yl_3.w * (q1[3] & 0xF000);
+            acc2[0] += yh_1.z * (q2[3] & 0x000F);
+            acc2[1] += yh_1.w * (q2[3] & 0x0F00);
+            acc2[2] += yh_3.z * (q2[3] & 0x00F0);
+            acc2[3] += yh_3.w * (q2[3] & 0xF000);
 
             sumf[row] += dh[0] * ((acc1[0] + 1.f/256.f * acc1[1]) * sc8[0] +
                                   (acc1[2] + 1.f/256.f * acc1[3]) * sc8[1] * 1.f/16.f +
@@ -7261,8 +7295,6 @@ void kernel_mul_mv_q6_K_f32_impl(
 
     float sumf[nr0] = { 0.f };
 
-    float yl[16];
-
     const short tid = tiisg/(N_SIMDWIDTH/16);  // 0...15
     const short ix  = tiisg%(N_SIMDWIDTH/16);  // 0...(N_SIMDWIDTH/16-1)
     const short ip  = tid/8;         // 0 or 1
@@ -7283,22 +7315,36 @@ void kernel_mul_mv_q6_K_f32_impl(
 
         device const float * y = yy + i * QK_K + y_offset;
 
-        for (short l = 0; l < 4; ++l) {
-            yl[4*l + 0] = y[l +  0];
-            yl[4*l + 1] = y[l + 32];
-            yl[4*l + 2] = y[l + 64];
-            yl[4*l + 3] = y[l + 96];
-        }
+        // Load B vector using float4 for wider memory access (4 loads instead of 16 scalar)
+        float4 y_0 = *(device const float4 *)(y +  0);
+        float4 y_1 = *(device const float4 *)(y + 32);
+        float4 y_2 = *(device const float4 *)(y + 64);
+        float4 y_3 = *(device const float4 *)(y + 96);
 
         for (short row = 0; row < nr0; ++row) {
             float4 sums = {0.f, 0.f, 0.f, 0.f};
 
-            FOR_UNROLL (short l = 0; l < 4; ++l) {
-                sums[0] += yl[4*l + 0] * ((int8_t)((q1[l] & 0xF) | ((qh[l] & kmask1) << 4)) - 32);
-                sums[1] += yl[4*l + 1] * ((int8_t)((q2[l] & 0xF) | ((qh[l] & kmask2) << 2)) - 32);
-                sums[2] += yl[4*l + 2] * ((int8_t)((q1[l]  >> 4) | ((qh[l] & kmask3) << 0)) - 32);
-                sums[3] += yl[4*l + 3] * ((int8_t)((q2[l]  >> 4) | ((qh[l] & kmask4) >> 2)) - 32);
-            }
+            // Unrolled inner loop using float4 components directly
+            // l=0: yl[0]=y_0.x, yl[1]=y_1.x, yl[2]=y_2.x, yl[3]=y_3.x
+            sums[0] += y_0.x * ((int8_t)((q1[0] & 0xF) | ((qh[0] & kmask1) << 4)) - 32);
+            sums[1] += y_1.x * ((int8_t)((q2[0] & 0xF) | ((qh[0] & kmask2) << 2)) - 32);
+            sums[2] += y_2.x * ((int8_t)((q1[0]  >> 4) | ((qh[0] & kmask3) << 0)) - 32);
+            sums[3] += y_3.x * ((int8_t)((q2[0]  >> 4) | ((qh[0] & kmask4) >> 2)) - 32);
+            // l=1: yl[4]=y_0.y, yl[5]=y_1.y, yl[6]=y_2.y, yl[7]=y_3.y
+            sums[0] += y_0.y * ((int8_t)((q1[1] & 0xF) | ((qh[1] & kmask1) << 4)) - 32);
+            sums[1] += y_1.y * ((int8_t)((q2[1] & 0xF) | ((qh[1] & kmask2) << 2)) - 32);
+            sums[2] += y_2.y * ((int8_t)((q1[1]  >> 4) | ((qh[1] & kmask3) << 0)) - 32);
+            sums[3] += y_3.y * ((int8_t)((q2[1]  >> 4) | ((qh[1] & kmask4) >> 2)) - 32);
+            // l=2: yl[8]=y_0.z, yl[9]=y_1.z, yl[10]=y_2.z, yl[11]=y_3.z
+            sums[0] += y_0.z * ((int8_t)((q1[2] & 0xF) | ((qh[2] & kmask1) << 4)) - 32);
+            sums[1] += y_1.z * ((int8_t)((q2[2] & 0xF) | ((qh[2] & kmask2) << 2)) - 32);
+            sums[2] += y_2.z * ((int8_t)((q1[2]  >> 4) | ((qh[2] & kmask3) << 0)) - 32);
+            sums[3] += y_3.z * ((int8_t)((q2[2]  >> 4) | ((qh[2] & kmask4) >> 2)) - 32);
+            // l=3: yl[12]=y_0.w, yl[13]=y_1.w, yl[14]=y_2.w, yl[15]=y_3.w
+            sums[0] += y_0.w * ((int8_t)((q1[3] & 0xF) | ((qh[3] & kmask1) << 4)) - 32);
+            sums[1] += y_1.w * ((int8_t)((q2[3] & 0xF) | ((qh[3] & kmask2) << 2)) - 32);
+            sums[2] += y_2.w * ((int8_t)((q1[3]  >> 4) | ((qh[3] & kmask3) << 0)) - 32);
+            sums[3] += y_3.w * ((int8_t)((q2[3]  >> 4) | ((qh[3] & kmask4) >> 2)) - 32);
 
             sumf[row] += dh[0] * (sums[0] * sc[0] + sums[1] * sc[2] + sums[2] * sc[4] + sums[3] * sc[6]);
 

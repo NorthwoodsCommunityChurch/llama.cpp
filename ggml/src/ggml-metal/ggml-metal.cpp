@@ -700,7 +700,10 @@ static ggml_backend_t ggml_backend_metal_device_init_backend(ggml_backend_dev_t 
         /* .context   = */ ctx,
     };
 
-    ggml_backend_metal_set_n_cb(backend, 1);
+    // discrete GPUs benefit from n_cb=2 for better command buffer parallelism (issue #15228)
+    const ggml_metal_device_props * props_dev = ggml_metal_device_get_props(ctx_dev);
+    int n_cb = props_dev->has_unified_memory ? 1 : 2;
+    ggml_backend_metal_set_n_cb(backend, n_cb);
 
     return backend;
 
