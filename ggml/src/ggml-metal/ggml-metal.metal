@@ -6713,9 +6713,6 @@ void kernel_mul_mv_q2_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
-#if N_SIMDWIDTH > 32
-    if (tiisg >= 32) return;
-#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -6738,7 +6735,7 @@ void kernel_mul_mv_q2_K_f32_impl(
     float yl[32];
     float sumf[nr0]={0.f};
 
-    const short ix = tiisg/8;  // 0...3
+    const short ix = tiisg/8;  // 0...(N_SIMDWIDTH/8-1)
     const short it = tiisg%8;  // 0...7
     const short iq = it/4;     // 0 or 1
     const short ir = it%4;     // 0...3
@@ -6746,7 +6743,7 @@ void kernel_mul_mv_q2_K_f32_impl(
 
     device const float * y4 = y + ix * QK_K + 128 * iq + 8 * ir;
 
-    for (int ib = ix; ib < nb; ib += 4) {
+    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/8) {
         float4 sumy = {0.f, 0.f, 0.f, 0.f};
         for (short i = 0; i < 8; ++i) {
             yl[i+ 0] = y4[i+ 0]; sumy[0] += yl[i+ 0];
@@ -6785,7 +6782,7 @@ void kernel_mul_mv_q2_K_f32_impl(
             dh += args.nb01/2;
         }
 
-        y4 += 4 * QK_K;
+        y4 += (N_SIMDWIDTH/8) * QK_K;
     }
 
     device float * dst_f32 = (device float *) dst + (uint64_t)im*args.ne0*args.ne1 + (uint64_t)r1*args.ne0;
@@ -6821,9 +6818,6 @@ void kernel_mul_mv_q3_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
-#if N_SIMDWIDTH > 32
-    if (tiisg >= 32) return;
-#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -6848,8 +6842,8 @@ void kernel_mul_mv_q3_K_f32_impl(
     //const uint16_t kmask1 = 0x3030;
     //const uint16_t kmask2 = 0x0f0f;
 
-    const short tid = tiisg/4;
-    const short ix  = tiisg%4;
+    const short tid = tiisg/(N_SIMDWIDTH/8);  // 0...7
+    const short ix  = tiisg%(N_SIMDWIDTH/8);  // 0...(N_SIMDWIDTH/8-1)
     const short ip  = tid/4;          // 0 or 1
     const short il  = 2*((tid%4)/2);  // 0 or 2
     const short ir  = tid%2;
@@ -6890,7 +6884,7 @@ void kernel_mul_mv_q3_K_f32_impl(
     float sumf1[nr0] = {0.f};
     float sumf2[nr0] = {0.f};
 
-    for (int i = ix; i < nb; i += 4) {
+    for (int i = ix; i < nb; i += N_SIMDWIDTH/8) {
         for (short l = 0; l < 8; ++l) {
             yl[l+ 0] = y1[l+ 0];
             yl[l+ 8] = y1[l+16];
@@ -6949,7 +6943,7 @@ void kernel_mul_mv_q3_K_f32_impl(
             dh += args.nb01/2;
         }
 
-        y1 += 4 * QK_K;
+        y1 += (N_SIMDWIDTH/8) * QK_K;
     }
 
     for (int row = 0; row < nr0; ++row) {
@@ -6989,16 +6983,13 @@ void kernel_mul_mv_q4_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
-#if N_SIMDWIDTH > 32
-    if (tiisg >= 32) return;
-#endif
     const short NSG = FC_mul_mv_nsg;
 
     constexpr uint16_t kmask1 = 0x3f3f;
     constexpr uint16_t kmask2 = 0x0f0f;
     constexpr uint16_t kmask3 = 0xc0c0;
 
-    const short ix = tiisg/8;  // 0...3
+    const short ix = tiisg/8;  // 0...(N_SIMDWIDTH/8-1)
     const short it = tiisg%8;  // 0...7
     const short iq = it/4;     // 0 or 1
     const short ir = it%4;     // 0...3
@@ -7030,7 +7021,7 @@ void kernel_mul_mv_q4_K_f32_impl(
     uint16_t sc16[4];
     thread const uint8_t * sc8 = (thread const uint8_t *)sc16;
 
-    for (int ib = ix; ib < nb; ib += 4) {
+    for (int ib = ix; ib < nb; ib += N_SIMDWIDTH/8) {
         float4 sumy = {0.f, 0.f, 0.f, 0.f};
 
         for (short i = 0; i < 8; ++i) {
@@ -7077,7 +7068,7 @@ void kernel_mul_mv_q4_K_f32_impl(
             dh += args.nb01/2;
         }
 
-        y4 += 4 * QK_K;
+        y4 += (N_SIMDWIDTH/8) * QK_K;
     }
 
     device float * dst_f32 = (device float *) dst + (int64_t)im*args.ne0*args.ne1 + (int64_t)r1*args.ne0;
@@ -7113,9 +7104,6 @@ void kernel_mul_mv_q5_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
-#if N_SIMDWIDTH > 32
-    if (tiisg >= 32) return;
-#endif
     const short NSG = FC_mul_mv_nsg;
 
     const int nb = args.ne00/QK_K;
@@ -7143,8 +7131,8 @@ void kernel_mul_mv_q5_K_f32_impl(
     constexpr uint16_t kmask2 = 0x0f0f;
     constexpr uint16_t kmask3 = 0xc0c0;
 
-    const short tid = tiisg/4;
-    const short ix  = tiisg%4;
+    const short tid = tiisg/(N_SIMDWIDTH/8);  // 0...7
+    const short ix  = tiisg%(N_SIMDWIDTH/8);  // 0...(N_SIMDWIDTH/8-1)
     const short iq  = tid/4;
     const short ir  = tid%4;
 
@@ -7162,7 +7150,7 @@ void kernel_mul_mv_q5_K_f32_impl(
 
     device const float * y1 = yy + ix*QK_K + y_offset;
 
-    for (int i = ix; i < nb; i += 4) {
+    for (int i = ix; i < nb; i += N_SIMDWIDTH/8) {
         device const uint8_t * q1 = x[i].qs + q_offset;
         device const uint8_t * qh = x[i].qh + l0;
         device const half * dh = &x[i].d;
@@ -7211,7 +7199,7 @@ void kernel_mul_mv_q5_K_f32_impl(
             a  += args.nb01/2;
         }
 
-        y1 += 4 * QK_K;
+        y1 += (N_SIMDWIDTH/8) * QK_K;
     }
 
     device float * dst_f32 = (device float *) dst + (uint64_t)im*args.ne0*args.ne1 + (uint64_t)r1*args.ne0;
@@ -7247,9 +7235,6 @@ void kernel_mul_mv_q6_K_f32_impl(
         uint3  tgpig,
         ushort tiisg,
         ushort sgitg) {
-#if N_SIMDWIDTH > 32
-    if (tiisg >= 32) return;
-#endif
     const short NSG = FC_mul_mv_nsg;
 
     constexpr uint8_t kmask1 = 0x03;
@@ -7278,8 +7263,8 @@ void kernel_mul_mv_q6_K_f32_impl(
 
     float yl[16];
 
-    const short tid = tiisg/2;
-    const short ix  = tiisg%2;
+    const short tid = tiisg/(N_SIMDWIDTH/16);  // 0...15
+    const short ix  = tiisg%(N_SIMDWIDTH/16);  // 0...(N_SIMDWIDTH/16-1)
     const short ip  = tid/8;         // 0 or 1
     const short il  = tid%8;
     const short l0  = 4*il;
@@ -7289,7 +7274,7 @@ void kernel_mul_mv_q6_K_f32_impl(
     const short q_offset_l =  64*ip + l0;
     const short q_offset_h =  32*ip + l0;
 
-    for (int i = ix; i < nb; i += 2) {
+    for (int i = ix; i < nb; i += N_SIMDWIDTH/16) {
         device const uint8_t * q1 = x[i].ql + q_offset_l;
         device const uint8_t * q2 = q1 + 32;
         device const uint8_t * qh = x[i].qh + q_offset_h;
