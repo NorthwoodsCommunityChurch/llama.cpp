@@ -171,8 +171,8 @@ ggml_metal_library_t ggml_metal_library_init(ggml_metal_device_t dev) {
             path_lib = path_lib_default;
         }
 
-        if (path_lib != nil) {
-            // pre-compiled library found
+        if (path_lib != nil && ggml_metal_device_get_props(dev)->simd_width == 32) {
+            // pre-compiled library found (only usable when SIMD width matches the default of 32)
             NSURL * libURL = [NSURL fileURLWithPath:path_lib];
             GGML_LOG_INFO("%s: loading '%s'\n", __func__, [path_lib UTF8String]);
 
@@ -182,6 +182,10 @@ ggml_metal_library_t ggml_metal_library_init(ggml_metal_device_t dev) {
                 return nil;
             }
         } else {
+            if (path_lib != nil) {
+                GGML_LOG_INFO("%s: skipping pre-compiled metallib (SIMD width=%d != 32), compiling from source\n",
+                    __func__, ggml_metal_device_get_props(dev)->simd_width);
+            }
             GGML_LOG_INFO("%s: default.metallib not found, loading from source\n", __func__);
 
             NSString * path_source;
@@ -221,6 +225,13 @@ ggml_metal_library_t ggml_metal_library_init(ggml_metal_device_t dev) {
 
                 if (ggml_metal_device_get_props(dev)->has_tensor) {
                     [prep setObject:@"1" forKey:@"GGML_METAL_HAS_TENSOR"];
+                }
+
+                // pass SIMD width so Metal shaders use the correct value for this device
+                {
+                    int simd_w = ggml_metal_device_get_props(dev)->simd_width;
+                    [prep setObject:[NSString stringWithFormat:@"%d", simd_w] forKey:@"N_SIMDWIDTH"];
+                    GGML_LOG_INFO("%s: compiling Metal shaders with N_SIMDWIDTH=%d\n", __func__, simd_w);
                 }
 
 #if GGML_METAL_EMBED_LIBRARY
@@ -342,6 +353,10 @@ void ggml_metal_library_free(ggml_metal_library_t lib) {
     [lib->lock release];
 
     free(lib);
+}
+
+int ggml_metal_library_get_simd_width(ggml_metal_library_t lib) {
+    return [lib->device hasUnifiedMemory] ? 32 : 64;
 }
 
 struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline(ggml_metal_library_t lib, const char * name) {
@@ -665,13 +680,18 @@ ggml_metal_device_t ggml_metal_device_init(int device) {
             dev->props.has_simdgroup_mm = [dev->mtl_device supportsFamily:MTLGPUFamilyApple7];
             dev->props.has_unified_memory = dev->mtl_device.hasUnifiedMemory;
 
-            // for discrete AMD GPUs: disable features that cause incorrect output
-            // AMD wavefront width is 64 vs Apple SIMD width 32 - simdgroup operations
-            // (simd_sum, simd_max, simdgroup_T8x8) produce numerically wrong results
+            // set SIMD width based on GPU type
+            // Apple Silicon: 32-wide SIMD groups
+            // AMD discrete GPUs (GCN/RDNA): 64-wide wavefronts
             if (!dev->props.has_unified_memory) {
-                dev->props.has_simdgroup_reduction = false;
+                dev->props.simd_width = 64;
+                // AMD supports SIMD-scoped reductions (simd_sum, simd_max) but NOT
+                // Apple's simdgroup_matrix (simdgroup_T8x8) which is used by simdgroup_mm
                 dev->props.has_simdgroup_mm = false;
-                GGML_LOG_INFO("%s: discrete GPU detected - disabling simdgroup_mm and simdgroup_reduction\n", __func__);
+                GGML_LOG_INFO("%s: discrete GPU detected - simd_width=%d, simdgroup_mm disabled\n",
+                    __func__, dev->props.simd_width);
+            } else {
+                dev->props.simd_width = 32;
             }
 
             dev->props.has_bfloat  = [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
@@ -876,6 +896,7 @@ ggml_metal_device_t ggml_metal_device_init(int device) {
                 }
             }
 
+            GGML_LOG_INFO("%s: simd width            = %d\n",  __func__, dev->props.simd_width);
             GGML_LOG_INFO("%s: simdgroup reduction   = %s\n", __func__, dev->props.has_simdgroup_reduction ? "true" : "false");
             GGML_LOG_INFO("%s: simdgroup matrix mul. = %s\n", __func__, dev->props.has_simdgroup_mm        ? "true" : "false");
             GGML_LOG_INFO("%s: has unified memory    = %s\n", __func__, dev->props.has_unified_memory      ? "true" : "false");

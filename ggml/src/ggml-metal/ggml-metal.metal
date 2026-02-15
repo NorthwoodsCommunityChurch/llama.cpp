@@ -25,7 +25,11 @@ using namespace metal;
 
 #define FOR_UNROLL(x) _Pragma("clang loop unroll(full)") for (x)
 
-#define N_SIMDWIDTH 32 // assuming SIMD group size is 32
+// SIMD group width: 32 for Apple Silicon, 64 for AMD discrete GPUs
+// can be overridden via preprocessor define during library compilation
+#ifndef N_SIMDWIDTH
+#define N_SIMDWIDTH 32
+#endif
 
 // ref: https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf
 //

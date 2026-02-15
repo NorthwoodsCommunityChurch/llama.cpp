@@ -880,7 +880,7 @@ int ggml_metal_op_sum(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_sum(lib, op);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < (int) n && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
@@ -889,7 +889,8 @@ int ggml_metal_op_sum(ggml_metal_op_t ctx, int idx) {
     nth = std::min(nth, ggml_metal_pipeline_max_theads_per_threadgroup(pipeline));
     nth = std::min(nth, (int) n);
 
-    const int nsg = (nth + 31) / 32;
+    const int simd_w = ggml_metal_device_get_props(ctx->dev)->simd_width;
+    const int nsg = (nth + simd_w - 1) / simd_w;
 
     ggml_metal_encoder_set_pipeline(enc, pipeline);
     ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
@@ -945,7 +946,7 @@ int ggml_metal_op_sum_rows(ggml_metal_op_t ctx, int idx) {
         args.ne0  = ne0/4;
     }
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < args.ne00 && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
@@ -1000,7 +1001,7 @@ int ggml_metal_op_cumsum(ggml_metal_op_t ctx, int idx) {
     const uint64_t nbt2 = net1*nbt1;
     const uint64_t nbt3 = net2*nbt2;
 
-    const size_t smem = GGML_PAD(32*sizeof(float), 16);
+    const size_t smem = GGML_PAD(ggml_metal_device_get_props(ctx->dev)->simd_width*sizeof(float), 16);
 
     ggml_metal_buffer_id bid_src0 = ggml_metal_get_buffer_id(op->src[0]);
     ggml_metal_buffer_id bid_dst  = ggml_metal_get_buffer_id(op);
@@ -1173,7 +1174,7 @@ int ggml_metal_op_set_rows(ggml_metal_op_t ctx, int idx) {
 
     const int32_t nk0 = ne0/ggml_blck_size(op->type);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < nk0 && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
@@ -1314,7 +1315,7 @@ int ggml_metal_op_soft_max(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_soft_max(lib, op);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     if (ne00%4 == 0) {
         while (nth < ne00/4 && nth*ne01*ne02*ne03 < 256) {
@@ -3162,7 +3163,7 @@ int ggml_metal_op_l2_norm(ggml_metal_op_t ctx, int idx) {
         args.ne0  = ne0/4;
     }
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < ne00 && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
@@ -3213,7 +3214,7 @@ int ggml_metal_op_group_norm(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_group_norm(lib, op);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
     //while (nth < ne00/4 && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
     //    nth *= 2;
     //}
@@ -3348,7 +3349,7 @@ int ggml_metal_op_norm(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_norm(lib, op, n_fuse);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < args.ne00_t && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
@@ -3949,7 +3950,7 @@ int ggml_metal_op_argmax(ggml_metal_op_t ctx, int idx) {
 
     const int64_t nrows = ggml_nrows(op->src[0]);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
     while (nth < ne00 && nth*ne01*ne02*ne03 < 256) {
         nth *= 2;
     }
@@ -4219,7 +4220,7 @@ int ggml_metal_op_tri(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_tri(lib, op);
 
-    int nth = 32; // SIMD width
+    int nth = ggml_metal_device_get_props(ctx->dev)->simd_width;
 
     while (nth < ne00 && nth < ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)) {
         nth *= 2;
