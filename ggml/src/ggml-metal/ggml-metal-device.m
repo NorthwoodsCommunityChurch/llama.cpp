@@ -666,11 +666,12 @@ ggml_metal_device_t ggml_metal_device_init(int device) {
             dev->props.has_unified_memory = dev->mtl_device.hasUnifiedMemory;
 
             // for discrete AMD GPUs: disable features that cause incorrect output
+            // AMD wavefront width is 64 vs Apple SIMD width 32 - simdgroup operations
+            // (simd_sum, simd_max, simdgroup_T8x8) produce numerically wrong results
             if (!dev->props.has_unified_memory) {
-                // simdgroup matrix multiply uses Apple's simdgroup_T8x8 types which
-                // produce incorrect results on AMD GPUs - disable
+                dev->props.has_simdgroup_reduction = false;
                 dev->props.has_simdgroup_mm = false;
-                GGML_LOG_INFO("%s: discrete GPU detected - disabling simdgroup_mm\n", __func__);
+                GGML_LOG_INFO("%s: discrete GPU detected - disabling simdgroup_mm and simdgroup_reduction\n", __func__);
             }
 
             dev->props.has_bfloat  = [dev->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
